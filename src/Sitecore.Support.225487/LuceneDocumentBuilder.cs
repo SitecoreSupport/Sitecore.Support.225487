@@ -1,21 +1,21 @@
 ﻿using System;
-using System.Text;
-using System.Threading.Tasks;
-using Sitecore.ContentSearch.ComputedFields;
-using Sitecore.ContentSearch.Diagnostics;
-using Sitecore.ContentSearch.Utilities;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text;
 using Lucene.Net.Documents;
+using Sitecore.ContentSearch;
 using Sitecore.ContentSearch.Boosting;
+using Sitecore.ContentSearch.ComputedFields;
+using Sitecore.ContentSearch.Diagnostics;
+using Sitecore.ContentSearch.LuceneProvider;
 using Sitecore.Diagnostics;
 
-namespace Sitecore.ContentSearch.LuceneProvider
+namespace Sitecore.Support.ContentSearch.LuceneProvider
 {
-
-  public partial class LuceneDocumentBuilder : AbstractDocumentBuilder<Document>
+  public partial class LuceneDocumentBuilder : Sitecore.ContentSearch.LuceneProvider.LuceneDocumentBuilder
   {
-    private ConcurrentQueue<IFieldable> fields = new ConcurrentQueue<IFieldable>();
+    private ConcurrentQueue<IFieldable> _fields = new ConcurrentQueue<IFieldable>();
 
     private readonly LuceneSearchFieldConfiguration defaultTextField = new LuceneSearchFieldConfiguration("NO", "TOKENIZED", "NO", 1.0f);
 
@@ -23,11 +23,11 @@ namespace Sitecore.ContentSearch.LuceneProvider
 
     private readonly IProviderUpdateContext Context;
 
-    public ConcurrentQueue<IFieldable> CollectedFields
+    public new ConcurrentQueue<IFieldable> CollectedFields
     {
       get
       {
-        return this.fields;
+        return this._fields;
       }
     }
 
@@ -35,7 +35,9 @@ namespace Sitecore.ContentSearch.LuceneProvider
         : base(indexable, context)
     {
       this.Context = context;
+      _fields = (base.GetType().BaseType.GetField("fields", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(this) as ConcurrentQueue<IFieldable>);
     }
+
 
     public override void AddField(string fieldName, object fieldValue, bool append = false)
     {
@@ -53,7 +55,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
           fieldValue = fieldMap.FormatForWriting(fieldValue);
         }
 
-        AddField(fieldName, fieldValue, fieldSettings);
+        this.AddField(fieldName, fieldValue, fieldSettings);
         return;
       }
 
@@ -68,7 +70,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
 
       object formattedValue;
       var multiValueField = fieldValue as IEnumerable;
-      if (multiValueField != null && fieldValue.GetType().IsGenericType)
+      if (multiValueField != null && !(fieldValue is string))
       {
         foreach (var value in multiValueField)
         {
@@ -80,7 +82,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
 
           if (formattedValue != null)
           {
-            fields.Enqueue(new Field(fieldName, formattedValue.ToString(), Field.Store.YES, Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
+            _fields.Enqueue(new Field(fieldName, formattedValue.ToString(), Field.Store.YES, Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
           }
         }
 
@@ -95,7 +97,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
 
       if (formattedValue != null)
       {
-        fields.Enqueue(new Field(fieldName, formattedValue.ToString(), Field.Store.YES, Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
+        _fields.Enqueue(new Field(fieldName, formattedValue.ToString(), Field.Store.YES, Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
       }
     }
 
@@ -138,7 +140,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
       }
     }
 
-    protected void AddField(string name, object value, LuceneSearchFieldConfiguration fieldSettings, float boost = 0)
+    protected new void AddField(string name, object value, LuceneSearchFieldConfiguration fieldSettings, float boost = 0)
     {
       Assert.IsNotNull(fieldSettings, "fieldSettings");
 
@@ -150,7 +152,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
 
       IFieldable field;
 
-      if (multiValueField != null && value.GetType().IsGenericType)
+      if (multiValueField != null && !(value is string))
       {
         foreach (var innerVal in multiValueField)
         {
@@ -161,7 +163,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
           if (field != null)
           {
             field.Boost = boost;
-            fields.Enqueue(field);
+            _fields.Enqueue(field);
           }
         }
 
@@ -175,7 +177,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
       if (field != null)
       {
         field.Boost = boost;
-        fields.Enqueue(field);
+        _fields.Enqueue(field);
       }
     }
 
@@ -200,7 +202,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
       }
     }
 
-    protected virtual void AddComputedIndexFieldsInParallel()
+    protected new virtual void AddComputedIndexFieldsInParallel()
     {
       ConcurrentQueue<Exception> exceptions = new ConcurrentQueue<Exception>();
       this.ParallelForeachProxy.ForEach(
@@ -235,7 +237,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
       }
     }
 
-    protected virtual void AddComputedIndexFieldsInSequence()
+    protected new virtual void AddComputedIndexFieldsInSequence()
     {
       foreach (var computedIndexField in this.Options.ComputedIndexFields)
       {
@@ -265,7 +267,7 @@ namespace Sitecore.ContentSearch.LuceneProvider
     {
       var setting = this.Index.Configuration.FieldMap.GetFieldConfiguration(computedIndexField.FieldName) as LuceneSearchFieldConfiguration;
 
-      if (fieldValue is IEnumerable && fieldValue.GetType().IsGenericType)
+      if (fieldValue is IEnumerable && !(fieldValue is string))
       {
         foreach (var field in fieldValue as IEnumerable)
         {
